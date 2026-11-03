@@ -189,19 +189,19 @@ class PerceptionReader(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InputAudioRawFrame):
-            self._handle_audio(frame)
+            await self._handle_audio(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
-            self._handle_vad_user_started_speaking(frame)
+            await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            self._handle_vad_user_stopped_speaking(frame)
+            await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
             await self._handle_mute(frame)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
-            self._handle_assistant_turn(frame)
+            await self._handle_assistant_turn(frame)
 
         await self.push_frame(frame, direction)
 
@@ -210,7 +210,7 @@ class PerceptionReader(FrameProcessor):
         if isinstance(frame, StartFrame):
             await self._declare_signals()
 
-    def _handle_audio(self, frame: InputAudioRawFrame):
+    async def _handle_audio(self, frame: InputAudioRawFrame):
         if self._audio_classifier and not self._muted:
             self._speech_buffer.append(frame.audio)
 
@@ -221,10 +221,10 @@ class PerceptionReader(FrameProcessor):
             else:
                 frame.perception = await self._read(frame.text)
 
-    def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
+    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._speech_buffer.start()
 
-    def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         if self._audio_classifier and self.is_usable:
             self._read_turn_audio(self._audio_classifier)
 
@@ -236,7 +236,7 @@ class PerceptionReader(FrameProcessor):
         if self._muted:
             await self._end_turn()
 
-    def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
+    async def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
         self._previous = frame.text
 
     async def _declare_signals(self):
