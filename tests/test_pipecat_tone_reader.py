@@ -11,6 +11,7 @@ import pytest
 from pipecat.classifiers.tone import model as reader_model
 from pipecat.classifiers.tone.model import PipecatToneReaderModel
 from pipecat.expressive.perception import PerceptionSignal
+from pipecat.expressive.processors.tone_reader import PipecatToneReader
 from pipecat.frames.frames import (
     ErrorFrame,
     InterimTranscriptionFrame,
@@ -19,7 +20,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.processors.tone import _models
-from pipecat.processors.tone.reader import PipecatToneReader
 from pipecat.tests.utils import run_test
 
 TAGS = {
