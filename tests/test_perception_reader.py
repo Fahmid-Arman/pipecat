@@ -23,6 +23,7 @@ from pipecat.classifiers.base_classifier import (
 )
 from pipecat.classifiers.segmented_audio_classifier import ClassifierAudio, SegmentedAudioClassifier
 from pipecat.expressive.perception import PerceptionSignal
+from pipecat.expressive.processors.perception_reader import PerceptionQuestion, PerceptionReader
 from pipecat.frames.frames import (
     ErrorFrame,
     InputAudioRawFrame,
@@ -37,7 +38,6 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.worker import PipelineParams
-from pipecat.processors.perception.reader import PerceptionQuestion, PerceptionReader
 from pipecat.tests.utils import SleepFrame, run_test
 
 QUESTIONS = {

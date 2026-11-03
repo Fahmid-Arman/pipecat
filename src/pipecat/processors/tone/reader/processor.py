@@ -11,7 +11,7 @@ from typing import Literal
 
 from pipecat.classifiers.tone.classifier import PipecatToneClassifier
 from pipecat.classifiers.tone.model import TONE_REVISION
-from pipecat.processors.perception.reader import PerceptionQuestion, PerceptionReader
+from pipecat.expressive.processors.perception_reader import PerceptionQuestion, PerceptionReader
 
 _EMOTION = (
     "The feeling the words show. Read from the words alone, so neutral means they show no "
