@@ -31,7 +31,7 @@ or from a runner body file, which ``harness.py call dial-out`` writes::
         --runner-body examples/sip/dialout-body.json
 
 Progress through a call shows as numbered INFO lines, ``[1/6]`` to
-``[6/6]`` — see ``milestones.py`` for what each one means and ``TESTING.md``
+``[6/6]`` — see ``milestones.py`` for what each one means and ``README.md``
 for the topology they trace.
 """
 
@@ -133,7 +133,7 @@ class HeardLogger(FrameProcessor):
 
     Shows in the bot terminal exactly what speech reached the LLM. The bot's
     own words appearing here about a second after it spoke them means the far
-    end is echoing its audio back — see TESTING.md troubleshooting.
+    end is echoing its audio back — see README.md troubleshooting.
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -215,11 +215,17 @@ async def run_bot(
 
         @transport.event_handler("on_connected")
         async def on_connected(transport, data=None):
-            import asyncio as _a; await _a.sleep(3.0)
             logger.info(f"Dialing {dialout_settings}")
             _, error = await transport.start_dialout(dialout_settings)
             if error:
                 logger.error(f"Dial-out failed: {error}")
+                if "Address family" in str(error):
+                    logger.info(
+                        "Hint: medianat=stun cannot run on a registration-less account. "
+                        "Rerun with SIP_STUN_SERVER=off (harness.py call dial-out prints "
+                        "it) and turn on the trunk's Symmetric RTP — see README.md "
+                        "troubleshooting."
+                    )
                 await runner.cancel()
 
     @transport.event_handler("on_client_connected")

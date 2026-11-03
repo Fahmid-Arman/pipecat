@@ -758,7 +758,7 @@ def note(text: str, detail: str = "") -> None:
         text: What the line reports.
         detail: Follow-up line, indented under it.
     """
-    print(f"  [note] {text}")
+    print(f"  [WARNING] {text}")
     if detail:
         print(f"         {detail}")
 
@@ -880,7 +880,7 @@ async def status_tier1(state: dict[str, Any]) -> bool:
             bool(numbers),
             "number routed to the trunk: "
             + (", ".join(n.get("phone_number", "?") for n in numbers) or "(none)"),
-            f"{hint} --number +1XXXXXXXXXX   (buying one costs money — see TESTING.md)",
+            f"{hint} --number +1XXXXXXXXXX   (buying one costs money — see README.md)",
         )
 
     return passed
@@ -1375,10 +1375,13 @@ def dialout_plan(state: dict[str, Any], to: str, *, strict: bool) -> tuple[dict,
         }
     }
     # Twilio termination authenticates each INVITE against the trunk's
-    # credential list, so the bot registers nowhere.
+    # credential list, so the bot registers nowhere. A registration-less
+    # account breaks medianat=stun (STUN lookup runs before any DNS fixes an
+    # address family), so STUN is off; the trunk's Symmetric RTP setting
+    # carries return media instead — see README.md troubleshooting.
     env = (
         f"SIP_USER={user} SIP_PASS={password} SIP_DOMAIN={domain} "
-        f"SIP_REG_INTERVAL=0 SIP_AUTH_USER={user}"
+        f"SIP_REG_INTERVAL=0 SIP_AUTH_USER={user} SIP_STUN_SERVER=off"
     )
     return body, f"{env} {run}"
 

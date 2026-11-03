@@ -237,6 +237,12 @@ domain, `SIP_REG_INTERVAL=0` so the bot registers nowhere, and
 INVITE. The body carries a `P-Asserted-Identity` header naming the trunk
 number, so the call presents a caller ID the PSTN accepts.
 
+The command also sets `SIP_STUN_SERVER=off` — a registration-less account
+cannot run `medianat=stun` (the dial fails instantly; see troubleshooting).
+With STUN off the bot advertises its LAN address, so **turn on the trunk's
+Symmetric RTP first** (Console > Elastic SIP Trunking > Trunks >
+`pipecat-harness` > General) or the bot will not hear the callee.
+
 ## What you should see
 
 Every milestone is one grep-able INFO line, `[N/6]`, emitted by
@@ -299,17 +305,25 @@ jump straight to established — the caller hears no ringback and the `[2/6]`
 milestone may never print. Ringing is a dial-out thing, where the far end
 decides when to pick up.
 
-**The call connects but audio flows only one way.** The bot advertises the
-address STUN reported, and behind a symmetric NAT that address is not where
-its media actually comes from. Symmetric RTP makes the trunk latch onto the
-bot's real RTP source address instead. It is off by default and the Twilio
-REST API cannot set it — `symmetric_rtp_enabled` is a read-only Trunk
-property, so turn it on by hand at Console > Elastic SIP Trunking > Trunks >
+**Dial-out through the trunk fails instantly with `dial failed: Address
+family not supported by protocol family`.** `medianat=stun` cannot run on a
+registration-less account (`SIP_REG_INTERVAL=0`): the STUN server lookup runs
+at dial time, before any DNS has fixed the account's address family, and the
+media session aborts before an INVITE is sent. Registered accounts (Tier 0,
+softphone dial-out) are unaffected. `call dial-out` therefore puts
+`SIP_STUN_SERVER=off` in the command it prints; with STUN off, return media
+needs the trunk's Symmetric RTP (next entry).
+
+**The call connects but audio flows only one way.** The far end is sending
+RTP to an address the bot is not reachable at: its LAN address when STUN is
+off (every trunk dial-out), or the STUN-reported address when the bot sits
+behind a symmetric NAT. Symmetric RTP makes the trunk latch onto the bot's
+real RTP source address instead. It is off by default and the Twilio REST API
+cannot set it — `symmetric_rtp_enabled` is a read-only Trunk property, so
+turn it on by hand at Console > Elastic SIP Trunking > Trunks >
 `pipecat-harness` > General > Symmetric RTP. `status` reports which way it is
-set. Twilio recommends leaving it off, so reach for it only once a one-way
-call has ruled out the alternatives: on a network where STUN itself is the
-wrong answer, set `SIP_STUN_SERVER=off`, or go through a TURN relay with
-`SIP_EXTRA_PARAMS=medianat=turn,...`.
+set. A TURN relay (`SIP_EXTRA_PARAMS=medianat=turn,...`) is the alternative
+when the far end cannot latch.
 
 **Nothing registers, or the INVITE goes unanswered.** Trace the signaling:
 
