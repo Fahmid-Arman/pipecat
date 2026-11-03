@@ -189,76 +189,62 @@ class PerceptionReader(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InputAudioRawFrame):
-            await self._handle_audio(frame, direction)
-        elif isinstance(frame, StartFrame):
-            await self._handle_start(frame, direction)
+            self._handle_audio(frame)
         elif isinstance(frame, TranscriptionFrame):
-            await self._handle_transcription(frame, direction)
+            await self._handle_transcription(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._handle_vad_user_started_speaking(frame, direction)
+            self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._handle_vad_user_stopped_speaking(frame, direction)
+            self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(frame, direction)
+            await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
-            await self._handle_mute(frame, direction)
+            await self._handle_mute(frame)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
-            await self._handle_assistant_turn(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
+            self._handle_assistant_turn(frame)
 
-    async def _handle_audio(self, frame: InputAudioRawFrame, direction: FrameDirection):
+        await self.push_frame(frame, direction)
+
+        # The declaration follows the StartFrame, which must reach every
+        # processor before anything else.
+        if isinstance(frame, StartFrame):
+            await self._declare_signals()
+
+    def _handle_audio(self, frame: InputAudioRawFrame):
         if self._audio_classifier and not self._muted:
             self._speech_buffer.append(frame.audio)
-        await self.push_frame(frame, direction)
 
-    async def _handle_start(self, frame: StartFrame, direction: FrameDirection):
-        await self.push_frame(frame, direction)
-        if self.is_usable:
-            await self.push_frame(
-                PerceptionMetadataFrame(service_name=self.name, perception=self._capabilities())
-            )
-
-    async def _handle_transcription(self, frame: TranscriptionFrame, direction: FrameDirection):
+    async def _handle_transcription(self, frame: TranscriptionFrame):
         if frame.text.strip() and self.is_usable:
             if self._audio_classifier:
                 frame.perception = await self._audio_reading()
             else:
                 frame.perception = await self._read(frame.text)
-        await self.push_frame(frame, direction)
 
-    async def _handle_vad_user_started_speaking(
-        self, frame: VADUserStartedSpeakingFrame, direction: FrameDirection
-    ):
+    def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._speech_buffer.start()
-        await self.push_frame(frame, direction)
 
-    async def _handle_vad_user_stopped_speaking(
-        self, frame: VADUserStoppedSpeakingFrame, direction: FrameDirection
-    ):
+    def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         if self._audio_classifier and self.is_usable:
             self._read_turn_audio(self._audio_classifier)
-        await self.push_frame(frame, direction)
 
-    async def _handle_user_stopped_speaking(
-        self, frame: UserStoppedSpeakingFrame, direction: FrameDirection
-    ):
+    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
         await self._end_turn()
-        await self.push_frame(frame, direction)
 
-    async def _handle_mute(
-        self, frame: UserMuteStartedFrame | UserMuteStoppedFrame, direction: FrameDirection
-    ):
+    async def _handle_mute(self, frame: UserMuteStartedFrame | UserMuteStoppedFrame):
         self._muted = isinstance(frame, UserMuteStartedFrame)
         if self._muted:
             await self._end_turn()
-        await self.push_frame(frame, direction)
 
-    async def _handle_assistant_turn(
-        self, frame: LLMContextAssistantTurnFrame, direction: FrameDirection
-    ):
+    def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
         self._previous = frame.text
-        await self.push_frame(frame, direction)
+
+    async def _declare_signals(self):
+        """Push the signals the reader reports, if it can report them."""
+        if self.is_usable:
+            await self.push_frame(
+                PerceptionMetadataFrame(service_name=self.name, perception=self._capabilities())
+            )
 
     def _capabilities(self) -> PerceptionCapabilities:
         """The signals the reader reports, from its questions."""
