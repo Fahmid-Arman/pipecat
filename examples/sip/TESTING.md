@@ -14,7 +14,7 @@ Two tiers, each self-contained:
 | Tier | Needs | Costs | Call clients | Proves |
 |---|---|---|---|---|
 | 0 | `DAILY_API_KEY` + Deepgram/OpenAI/Cartesia keys | nothing | macOS Telephone.app (or Linphone/Zoiper) registered as a Daily SIP client | REGISTER, INVITE, two-way RTP, DTMF, dial-in and dial-out — pure SIP, no PSTN |
-| 1 | Tier 0 plus `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | a number is ~$1.15/month, opt-in | your cell phone over the PSTN, plus a Twilio REST auto-caller with no human on the line | the same, across a real Elastic SIP trunk: origination, Symmetric RTP, termination auth |
+| 1 | Tier 0 plus `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | a number is ~$1.15/month, opt-in | your cell phone over the PSTN, plus a Twilio REST auto-caller with no human on the line | the same, across a real Elastic SIP trunk: origination, termination auth, IP ACL |
 
 Files here:
 
@@ -70,7 +70,7 @@ path:
 A path that works tells you its hops are sound; a path that fails next to a
 path that works localizes the fault to the hops they differ on. One-way audio
 on A+B+C+D while F+C+D is clean, for instance, points at B — the trunk's
-Symmetric RTP setting.
+media path.
 
 ## Tier 0 quickstart
 
@@ -166,7 +166,7 @@ convention:
 
 - a **trunk** `pipecat-harness` at `pipecat-harness-<8 hex>.pstn.twilio.com`
   (termination domains are globally unique, hence the suffix), with
-  `Secure=false` and `SymmetricRtp=true`
+  `Secure=false`
 - an **origination URI** pointing at the bot client's SIP URI with
   `;transport=tls`, priority 10, weight 10 — this is what makes a call to the
   trunk land on the registered bot
@@ -280,13 +280,17 @@ uv run python examples/sip/milestones.py
 
 ## Troubleshooting
 
-**The call connects but audio flows only one way.** The usual cause on Tier 1
-is Symmetric RTP: the bot advertises the address STUN reported, and behind a
-symmetric NAT that address is not where its media actually comes from. With
-`SymmetricRtp=true` the trunk latches onto the bot's real RTP source address
-instead. `status` checks the flag; `provision --tier 1` sets it. On a network
-where STUN itself is the wrong answer, set `SIP_STUN_SERVER=off`, or go
-through a TURN relay with `SIP_EXTRA_PARAMS=medianat=turn,...`.
+**The call connects but audio flows only one way.** The bot advertises the
+address STUN reported, and behind a symmetric NAT that address is not where
+its media actually comes from. Symmetric RTP makes the trunk latch onto the
+bot's real RTP source address instead. It is off by default and the Twilio
+REST API cannot set it — `symmetric_rtp_enabled` is a read-only Trunk
+property, so turn it on by hand at Console > Elastic SIP Trunking > Trunks >
+`pipecat-harness` > General > Symmetric RTP. `status` reports which way it is
+set. Twilio recommends leaving it off, so reach for it only once a one-way
+call has ruled out the alternatives: on a network where STUN itself is the
+wrong answer, set `SIP_STUN_SERVER=off`, or go through a TURN relay with
+`SIP_EXTRA_PARAMS=medianat=turn,...`.
 
 **Nothing registers, or the INVITE goes unanswered.** Trace the signaling:
 
