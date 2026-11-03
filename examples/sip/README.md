@@ -258,7 +258,7 @@ What each one means about the SIP machinery underneath:
 | Line | What just happened |
 |---|---|
 | `[1/6] REGISTER ok` | The bot's REGISTER was accepted and the registrar now maps its AOR to this host's contact. Until this lands nothing can reach the bot by name. In trunk mode (`SIP_REG_INTERVAL=0`) there is no registration at all and the line reads `trunk mode, skipping REGISTER` — the peer reaches the bot directly instead. |
-| `[2/6] INVITE — call ringing` | An INVITE arrived (or went out) and the call is in its provisional 180 Ringing state. Signaling works; media has not started. |
+| `[2/6] INVITE — call ringing` | An INVITE arrived (or went out) and the call is in its provisional 180 Ringing state. Signaling works; media has not started. An auto-answered dial-in can jump straight to established, skipping this line. |
 | `[3/6] answered, media flowing` | 200 OK, SDP negotiated, and the first RTP packet actually arrived. In this transport "connected" means answered *and* receiving audio, so this line is the one that rules out a NAT media failure. |
 | `[4/6] pipeline started` | `on_client_connected` fired; the pipeline is running and the greeting `LLMRunFrame` is queued. Audio frames now reach STT. |
 | `DTMF <tone>` | A dial-pad digit arrived as RFC 4733 telephone-event (or as SIP INFO, with `dtmf_mode="info"`). |
@@ -279,6 +279,25 @@ uv run python examples/sip/milestones.py
 ```
 
 ## Troubleshooting
+
+**The bot greets you, then greets you again a few seconds later.** The bot is
+hearing its own voice. Watch the `heard:` lines in the bot terminal: the bot's
+own words showing up there about a second after it spoke them means the far
+end is feeding its audio back. On the softphone that is acoustic echo —
+Telephone.app playing through the Mac's speakers while the built-in mic picks
+them up, with no echo cancellation anywhere on the SIP leg (a WebRTC browser
+would cancel this; a plain SIP client does not). The bot's VAD then treats the
+echo as the user talking, interrupts the greeting, and the LLM greets again.
+Fix: wear headphones on the softphone machine. To tell acoustic echo from
+echo in the media path itself, mute the softphone's microphone — if the
+repeats continue with the mic muted, the echo is upstream of you and worth a
+bug report with the `heard:` lines.
+
+**No ringing before the bot answers.** Expected on dial-in: the bot runs with
+`auto_answer`, so it accepts the INVITE as soon as it arrives and the call can
+jump straight to established — the caller hears no ringback and the `[2/6]`
+milestone may never print. Ringing is a dial-out thing, where the far end
+decides when to pick up.
 
 **The call connects but audio flows only one way.** The bot advertises the
 address STUN reported, and behind a symmetric NAT that address is not where

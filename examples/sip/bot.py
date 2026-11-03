@@ -44,7 +44,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import Frame, LLMRunFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -52,6 +52,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -127,6 +128,27 @@ def use_harness_account() -> None:
 use_harness_account()
 
 
+class HeardLogger(FrameProcessor):
+    """Logs every final transcription at INFO as ``heard: "..."``.
+
+    Shows in the bot terminal exactly what speech reached the LLM. The bot's
+    own words appearing here about a second after it spoke them means the far
+    end is echoing its audio back — see TESTING.md troubleshooting.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Pass frame through, logging final transcriptions.
+
+        Args:
+            frame: Frame to process.
+            direction: Direction the frame flows.
+        """
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TranscriptionFrame):
+            logger.info(f'heard: "{frame.text}"')
+        await self.push_frame(frame, direction)
+
+
 async def run_bot(
     transport: BaseTransport, runner_args: RunnerArguments, dialout_settings: dict | None
 ):
@@ -164,6 +186,7 @@ async def run_bot(
         [
             transport.input(),  # Transport user input
             stt,
+            HeardLogger(),  # INFO line per final transcription
             user_aggregator,  # User responses
             llm,  # LLM
             tts,  # TTS
@@ -192,6 +215,7 @@ async def run_bot(
 
         @transport.event_handler("on_connected")
         async def on_connected(transport, data=None):
+            import asyncio as _a; await _a.sleep(3.0)
             logger.info(f"Dialing {dialout_settings}")
             _, error = await transport.start_dialout(dialout_settings)
             if error:
