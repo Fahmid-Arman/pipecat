@@ -157,17 +157,19 @@ class PerceptionReader(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TranscriptionFrame):
+        if isinstance(frame, StartFrame):
+            # The declaration follows the StartFrame, which must reach every
+            # processor before anything else.
+            await self.push_frame(frame, direction)
+            await self._declare_signals()
+        elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
             await self._handle_assistant_turn(frame)
-
-        await self.push_frame(frame, direction)
-
-        # The declaration follows the StartFrame, which must reach every
-        # processor before anything else.
-        if isinstance(frame, StartFrame):
-            await self._declare_signals()
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         if frame.text.strip() and self.is_usable:
