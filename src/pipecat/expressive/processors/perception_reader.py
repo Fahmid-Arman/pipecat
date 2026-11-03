@@ -190,25 +190,32 @@ class PerceptionReader(FrameProcessor):
 
         if isinstance(frame, InputAudioRawFrame):
             await self._handle_audio(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, StartFrame):
+            # The declaration follows the StartFrame, which must reach every
+            # processor before anything else.
+            await self.push_frame(frame, direction)
+            await self._declare_signals()
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
             await self._handle_mute(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
             await self._handle_assistant_turn(frame)
-
-        await self.push_frame(frame, direction)
-
-        # The declaration follows the StartFrame, which must reach every
-        # processor before anything else.
-        if isinstance(frame, StartFrame):
-            await self._declare_signals()
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
 
     async def _handle_audio(self, frame: InputAudioRawFrame):
         if self._audio_classifier and not self._muted:
