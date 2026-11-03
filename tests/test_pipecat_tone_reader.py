@@ -8,6 +8,8 @@
 
 import pytest
 
+from pipecat.classifiers.tone import model as reader_model
+from pipecat.classifiers.tone.model import PipecatToneReaderModel
 from pipecat.expressive.perception import PerceptionSignal
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -18,8 +20,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.tone import _models
 from pipecat.processors.tone.reader import PipecatToneReader
-from pipecat.processors.tone.reader import model as reader_model
-from pipecat.processors.tone.reader.model import PipecatToneReaderModel
 from pipecat.tests.utils import run_test
 
 TAGS = {
@@ -37,6 +37,7 @@ TAGS = {
 
 class FakeReaderModel:
     emotions = ["neutral", "happy", "angry", "sad"]
+    moves = ["asks", "answers", "other"]
 
     def __init__(self, error: Exception | None = None):
         self.reads: list[tuple[str, str | None]] = []
@@ -197,7 +198,7 @@ async def test_a_folder_of_your_own_loads_in_place_of_a_download(monkeypatch, tm
 
     def load(self, model_dir, precision, threads):
         loaded.append((model_dir, precision))
-        self.config = {"emotions": ["neutral", "happy"]}
+        self.config = {"emotions": ["neutral", "happy"], "moves": ["asks", "other"]}
 
     monkeypatch.setattr(PipecatToneReaderModel, "download", fail)
     monkeypatch.setattr(PipecatToneReaderModel, "__init__", load)

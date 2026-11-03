@@ -6,25 +6,12 @@
 
 """The processor that reads how each user turn was meant with Pipecat Tone."""
 
-import asyncio
 from pathlib import Path
 from typing import Literal
 
-from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
-from pipecat.frames.frames import (
-    Frame,
-    LLMContextAssistantTurnFrame,
-    PerceptionMetadataFrame,
-    StartFrame,
-    TranscriptionFrame,
-)
-from pipecat.processors.frame_processor import (
-    FrameDirection,
-    FrameProcessor,
-    FrameProcessorSetup,
-)
-from pipecat.processors.tone._models import load_model
-from pipecat.processors.tone.reader.model import TONE_REVISION, PipecatToneReaderModel
+from pipecat.classifiers.tone.classifier import PipecatToneClassifier
+from pipecat.classifiers.tone.model import TONE_REVISION
+from pipecat.processors.perception.reader import PerceptionQuestion, PerceptionReader
 
 _EMOTION = (
     "The feeling the words show. Read from the words alone, so neutral means they show no "
@@ -36,7 +23,7 @@ _SARCASM = (
 )
 
 
-class PipecatToneReader(FrameProcessor):
+class PipecatToneReader(PerceptionReader):
     """Reads how each user turn was meant with Pipecat Tone.
 
     Goes between the STT service and the user aggregator. Each final
@@ -44,7 +31,8 @@ class PipecatToneReader(FrameProcessor):
     set as its ``perception``: the turn's ``emotion``, its two likeliest labels
     with their confidences, and its ``sarcasm``, the chance it's sarcastic.
     The read runs off the event loop, and the transcription waits for it, a
-    few milliseconds.
+    few milliseconds. It's a :class:`PerceptionReader` that asks a
+    :class:`PipecatToneClassifier` its emotion and sarcasm questions.
 
     The model loads while the pipeline is set up, once a process, and every
     reader shares it. The first load downloads it from Hugging Face, which holds
@@ -80,76 +68,22 @@ class PipecatToneReader(FrameProcessor):
             threads: The CPU threads for one read.
             **kwargs: Additional arguments passed to the parent.
         """
-        super().__init__(**kwargs)
-        self._model: PipecatToneReaderModel | None = None
-        self._revision = revision
-        self._model_dir = Path(model_dir) if model_dir else None
-        self._precision: Literal["fp16", "fp32"] = precision
-        self._threads = threads
-        self._previous: str | None = None
+        tone = PipecatToneClassifier(
+            revision=revision, model_dir=model_dir, precision=precision, threads=threads
+        )
+        # Tone's questions come from its model once it's loaded: see `questions`.
+        super().__init__(classifier=tone, questions={}, **kwargs)
+        self._tone = tone
 
-    async def setup(self, setup: FrameProcessorSetup):
-        """Set up the processor and load its model.
+    @property
+    def questions(self) -> dict[str, PerceptionQuestion]:
+        """Tone's emotion and sarcasm questions, with the loaded model's options.
 
-        Args:
-            setup: Configuration object containing setup parameters.
+        Raises:
+            ClassifierError: If the model isn't loaded yet.
         """
-        await super().setup(setup)
-        self._model = await load_model(
-            self,
-            ("reader", self._model_dir or self._revision, self._precision, self._threads),
-            self._open_model,
-        )
-
-    def _open_model(self) -> PipecatToneReaderModel:
-        if self._model_dir:
-            return PipecatToneReaderModel(
-                self._model_dir, precision=self._precision, threads=self._threads
-            )
-        return PipecatToneReaderModel.download(
-            revision=self._revision, precision=self._precision, threads=self._threads
-        )
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Read final transcriptions, and keep the bot's replies to read them against.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
-            if self._model:
-                await self.push_frame(
-                    PerceptionMetadataFrame(service_name=self.name, perception=self._capabilities())
-                )
-            return
-        if isinstance(frame, TranscriptionFrame) and frame.text.strip() and self._model:
-            frame.perception = await self._read(frame.text)
-        elif isinstance(frame, LLMContextAssistantTurnFrame):
-            self._previous = frame.text
-        await self.push_frame(frame, direction)
-
-    def _capabilities(self) -> PerceptionCapabilities:
-        assert self._model
-        return PerceptionCapabilities(
-            signals=[
-                PerceptionTerm("emotion", _EMOTION, labels=list(self._model.emotions)),
-                PerceptionTerm("sarcasm", _SARCASM),
-            ]
-        )
-
-    async def _read(self, text: str) -> list[PerceptionSignal] | None:
-        assert self._model
-        try:
-            tags = await asyncio.to_thread(self._model.tag, text, self._previous)
-        except Exception as e:
-            await self.push_error(f"{self}: couldn't read the turn: {e}", e)
-            return None
-        likeliest = sorted(tags["emotion"]["probabilities"].items(), key=lambda p: -p[1])[:2]
-        return [
-            PerceptionSignal("emotion", labels=likeliest),
-            PerceptionSignal("sarcasm", value=round(tags["sarcasm"]["probability"], 2)),
-        ]
+        tone = self._tone.questions
+        return {
+            "emotion": PerceptionQuestion(question=tone["emotion"], description=_EMOTION),
+            "sarcasm": PerceptionQuestion(question=tone["sarcasm"], description=_SARCASM),
+        }
