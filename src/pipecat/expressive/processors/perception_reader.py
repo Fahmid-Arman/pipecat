@@ -157,32 +157,31 @@ class PerceptionReader(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            await self._handle_start(frame, direction)
-        elif isinstance(frame, TranscriptionFrame):
-            await self._handle_transcription(frame, direction)
+        if isinstance(frame, TranscriptionFrame):
+            await self._handle_transcription(frame)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
-            await self._handle_assistant_turn(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
+            self._handle_assistant_turn(frame)
 
-    async def _handle_start(self, frame: StartFrame, direction: FrameDirection):
         await self.push_frame(frame, direction)
+
+        # The declaration follows the StartFrame, which must reach every
+        # processor before anything else.
+        if isinstance(frame, StartFrame):
+            await self._declare_signals()
+
+    async def _handle_transcription(self, frame: TranscriptionFrame):
+        if frame.text.strip() and self.is_usable:
+            frame.perception = await self._read(frame.text)
+
+    def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
+        self._previous = frame.text
+
+    async def _declare_signals(self):
+        """Push the signals the reader reports, if it can report them."""
         if self.is_usable:
             await self.push_frame(
                 PerceptionMetadataFrame(service_name=self.name, perception=self._capabilities())
             )
-
-    async def _handle_transcription(self, frame: TranscriptionFrame, direction: FrameDirection):
-        if frame.text.strip() and self.is_usable:
-            frame.perception = await self._read(frame.text)
-        await self.push_frame(frame, direction)
-
-    async def _handle_assistant_turn(
-        self, frame: LLMContextAssistantTurnFrame, direction: FrameDirection
-    ):
-        self._previous = frame.text
-        await self.push_frame(frame, direction)
 
     def _capabilities(self) -> PerceptionCapabilities:
         """The signals the reader reports, from its questions."""
