@@ -34,6 +34,18 @@ def test_a_segment_starts_with_the_last_pre_speech_secs_before_it():
     assert buffer.stop() == _seconds(1, 0.5) + _seconds(2, 0.5) + _seconds(3, 3)
 
 
+def test_the_audio_held_can_be_read_without_emptying_the_buffer():
+    buffer = _buffer()
+
+    buffer.start()
+    buffer.append(_seconds(1, 1))
+    held = buffer.audio
+    buffer.append(_seconds(2, 1))
+
+    assert held == _seconds(1, 1)
+    assert buffer.stop() == _seconds(1, 1) + _seconds(2, 1)
+
+
 def test_stopping_empties_the_buffer_for_the_next_segment():
     buffer = _buffer()
 

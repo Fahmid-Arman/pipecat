@@ -42,6 +42,11 @@ class SpeechSegmentBuffer:
         self._buffer = bytearray()
         self._speaking = False
 
+    @property
+    def audio(self) -> bytes:
+        """The audio held now, as 16-bit mono PCM, leaving the buffer as it is."""
+        return bytes(self._buffer)
+
     def set_sample_rate(self, sample_rate: int):
         """Set the sample rate of the audio to come.
 

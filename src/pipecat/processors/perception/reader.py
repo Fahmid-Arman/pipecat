@@ -9,10 +9,12 @@
 import asyncio
 import re
 from collections.abc import Mapping
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.audio.speech_segment_buffer import SpeechSegmentBuffer
 from pipecat.classifiers.base_classifier import (
     BaseClassifier,
     ChoiceQuestion,
@@ -22,14 +24,21 @@ from pipecat.classifiers.base_classifier import (
     ClassifierResult,
     ScoreResult,
 )
+from pipecat.classifiers.segmented_audio_classifier import ClassifierAudio, SegmentedAudioClassifier
 from pipecat.expressive.perception import PerceptionCapabilities, PerceptionSignal, PerceptionTerm
 from pipecat.frames.frames import (
     Frame,
+    InputAudioRawFrame,
     LLMContextAssistantTurnFrame,
     MetricsFrame,
     PerceptionMetadataFrame,
     StartFrame,
     TranscriptionFrame,
+    UserMuteStartedFrame,
+    UserMuteStoppedFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import (
@@ -62,11 +71,20 @@ class PerceptionQuestion(BaseModel):
 class PerceptionReader(FrameProcessor):
     """Reads how each user turn was said by asking a classifier.
 
-    Goes between the STT service and the user aggregator. Each final
-    transcription is asked about, with the bot's reply before it, and the
-    answers are set as its ``perception``: one signal per question, named
-    after it. The signals are declared at start in a
+    Goes between the STT service and the user aggregator. The answers are set
+    as each final transcription's ``perception``: one signal per question,
+    named after it. The signals are declared at start in a
     :class:`~pipecat.frames.frames.PerceptionMetadataFrame`.
+
+    A text classifier is asked about each final transcription, with the bot's
+    reply before it. A
+    :class:`~pipecat.classifiers.segmented_audio_classifier.SegmentedAudioClassifier`
+    is asked about the audio of the user's turn instead, with the bot's reply
+    before it as the state. Each time the VAD reports silence, it hears the
+    turn so far, from a second before its speech started. A turn shorter than
+    the classifier's ``min_audio_secs`` isn't asked about, a clip isn't sent
+    while the turn's last one is still being read, and no audio is kept while
+    the user is muted.
 
     The transcription waits for its reading up to ``timeout`` seconds, and
     passes unread when the reading is late or the classifier fails. A
@@ -119,6 +137,16 @@ class PerceptionReader(FrameProcessor):
         self._questions = dict(questions)
         self._timeout = timeout
         self._previous: str | None = None
+        # The user's turn, kept and read for a classifier that hears audio.
+        self._audio_classifier = (
+            classifier if isinstance(classifier, SegmentedAudioClassifier) else None
+        )
+        self._speech_buffer = SpeechSegmentBuffer(
+            max_secs=self._audio_classifier.max_audio_secs if self._audio_classifier else None
+        )
+        self._sample_rate = 0
+        self._muted = False
+        self._audio_read: asyncio.Task | None = None
         self._classifier.add_event_handler("on_metrics", self._on_classifier_metrics)
 
     @property
@@ -138,6 +166,8 @@ class PerceptionReader(FrameProcessor):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
+        self._sample_rate = setup.audio_in_sample_rate
+        self._speech_buffer.set_sample_rate(self._sample_rate)
         try:
             await self._classifier.setup(self.task_manager)
         except ClassifierError as e:
@@ -146,10 +176,11 @@ class PerceptionReader(FrameProcessor):
     async def cleanup(self):
         """Clean up the processor and its classifier."""
         await super().cleanup()
+        await self._end_turn()
         await self._classifier.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Read final transcriptions, and keep the bot's replies to read them against.
+        """Read the user's turns, and keep the bot's replies to read them against.
 
         Args:
             frame: The frame to process.
@@ -157,14 +188,29 @@ class PerceptionReader(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
+        if isinstance(frame, InputAudioRawFrame):
+            await self._handle_audio(frame, direction)
+        elif isinstance(frame, StartFrame):
             await self._handle_start(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame, direction)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._handle_vad_user_started_speaking(frame, direction)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._handle_vad_user_stopped_speaking(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame, direction)
+        elif isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame)):
+            await self._handle_mute(frame, direction)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
             await self._handle_assistant_turn(frame, direction)
         else:
             await self.push_frame(frame, direction)
+
+    async def _handle_audio(self, frame: InputAudioRawFrame, direction: FrameDirection):
+        if self._audio_classifier and not self._muted:
+            self._speech_buffer.append(frame.audio)
+        await self.push_frame(frame, direction)
 
     async def _handle_start(self, frame: StartFrame, direction: FrameDirection):
         await self.push_frame(frame, direction)
@@ -175,7 +221,37 @@ class PerceptionReader(FrameProcessor):
 
     async def _handle_transcription(self, frame: TranscriptionFrame, direction: FrameDirection):
         if frame.text.strip() and self.is_usable:
-            frame.perception = await self._read(frame.text)
+            if self._audio_classifier:
+                frame.perception = await self._audio_reading()
+            else:
+                frame.perception = await self._read(frame.text)
+        await self.push_frame(frame, direction)
+
+    async def _handle_vad_user_started_speaking(
+        self, frame: VADUserStartedSpeakingFrame, direction: FrameDirection
+    ):
+        self._speech_buffer.start()
+        await self.push_frame(frame, direction)
+
+    async def _handle_vad_user_stopped_speaking(
+        self, frame: VADUserStoppedSpeakingFrame, direction: FrameDirection
+    ):
+        if self._audio_classifier and self.is_usable:
+            self._read_turn_audio(self._audio_classifier)
+        await self.push_frame(frame, direction)
+
+    async def _handle_user_stopped_speaking(
+        self, frame: UserStoppedSpeakingFrame, direction: FrameDirection
+    ):
+        await self._end_turn()
+        await self.push_frame(frame, direction)
+
+    async def _handle_mute(
+        self, frame: UserMuteStartedFrame | UserMuteStoppedFrame, direction: FrameDirection
+    ):
+        self._muted = isinstance(frame, UserMuteStartedFrame)
+        if self._muted:
+            await self._end_turn()
         await self.push_frame(frame, direction)
 
     async def _handle_assistant_turn(
@@ -198,21 +274,74 @@ class PerceptionReader(FrameProcessor):
         return list(question.options) if isinstance(question, ChoiceQuestion) else []
 
     async def _read(self, text: str) -> list[PerceptionSignal] | None:
-        """The turn's reading, or None when it's late or the classifier fails."""
+        """A transcription's reading, or None when it's late or the classifier fails."""
         questions = self.questions
         state = {"assistant": self._previous, "user": text} if self._previous else {"user": text}
         signals = None
         try:
             results = await asyncio.wait_for(
-                self._classifier.ask(state, {name: q.question for name, q in questions.items()}),
+                self._classifier.ask(state, self._classifier_questions(questions)),
                 self._timeout,
             )
-            signals = [self._signal(name, results[name], questions[name]) for name in questions]
+            signals = self._signals(results, questions)
         except TimeoutError:
             logger.warning(f"{self}: no reading after {self._timeout}s, the turn passes unread")
         except ClassifierError as e:
             await self.push_error(f"{self}: {e}", e)
         return signals
+
+    def _read_turn_audio(self, classifier: SegmentedAudioClassifier):
+        """Start reading the turn's audio so far, if it's long enough and no read is waiting."""
+        if self._audio_read and not self._audio_read.done():
+            return
+        clip = ClassifierAudio(audio=self._speech_buffer.audio, sample_rate=self._sample_rate)
+        if clip.duration_secs >= classifier.min_audio_secs:
+            state = {"assistant": self._previous} if self._previous else {}
+            self._audio_read = self.create_task(self._read_audio(classifier, state, clip))
+
+    async def _read_audio(
+        self, classifier: SegmentedAudioClassifier, state: dict[str, Any], clip: ClassifierAudio
+    ) -> list[PerceptionSignal] | None:
+        """A clip's reading, or None when the classifier fails."""
+        questions = self.questions
+        signals = None
+        try:
+            results = await classifier.ask(state, self._classifier_questions(questions), audio=clip)
+            signals = self._signals(results, questions)
+        except ClassifierError as e:
+            await self.push_error(f"{self}: {e}", e)
+        return signals
+
+    async def _audio_reading(self) -> list[PerceptionSignal] | None:
+        """The turn's latest audio reading, waited for up to the timeout, or None."""
+        read = self._audio_read
+        if not read:
+            return None
+        # A wait that neither cancels the read when it's late nor fails when
+        # the turn's end cancels it.
+        done, _ = await asyncio.wait({read}, timeout=self._timeout)
+        if not done:
+            logger.warning(f"{self}: no reading after {self._timeout}s, the turn passes unread")
+        return read.result() if done and not read.cancelled() else None
+
+    async def _end_turn(self):
+        """Drop the turn's audio and stop reading it."""
+        self._speech_buffer.stop()
+        if self._audio_read and not self._audio_read.done():
+            await self.cancel_task(self._audio_read)
+        self._audio_read = None
+
+    def _classifier_questions(
+        self, questions: Mapping[str, PerceptionQuestion]
+    ) -> dict[str, ClassifierQuestion]:
+        """The questions as the classifier is asked them."""
+        return {name: question.question for name, question in questions.items()}
+
+    def _signals(
+        self, results: Mapping[str, ClassifierResult], questions: Mapping[str, PerceptionQuestion]
+    ) -> list[PerceptionSignal]:
+        """The answers as the signals they report, in the questions' order."""
+        return [self._signal(name, results[name], questions[name]) for name in questions]
 
     def _signal(
         self, name: str, result: ClassifierResult, question: PerceptionQuestion
