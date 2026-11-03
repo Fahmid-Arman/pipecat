@@ -14,9 +14,11 @@ Copy ``env.example`` to ``.env`` next to this file, then dial in::
 
     uv run python examples/sip/bot.py -t sip -d
 
-With only ``DAILY_API_KEY`` set, the runner provisions a temporary Daily SIP
-client, prints its dialable URI, and deletes it when the bot exits. Run
-``harness.py provision`` first for a stable account a softphone can keep.
+Once ``harness.py provision`` has run, the bot registers as that stable
+``pipecat-harness-bot`` account, so the URI ``harness.py status`` prints is the
+one a softphone can dial. With only ``DAILY_API_KEY`` set it falls back to a
+temporary Daily SIP client the runner provisions, prints its dialable URI, and
+deletes when the bot exits.
 
 Dial out either from the environment::
 
@@ -33,6 +35,7 @@ Progress through a call shows as numbered INFO lines, ``[1/6]`` to
 for the topology they trace.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -64,6 +67,9 @@ from milestones import attach_milestones  # noqa: E402
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
+STATE_PATH = Path(__file__).parent / ".state.json"
+HARNESS_BOT_USER = "pipecat-harness-bot"
+
 SYSTEM_INSTRUCTION = (
     "You are a helpful assistant on a phone call. Your responses will be spoken "
     "aloud, so avoid emojis, bullet points, or other formatting that can't be "
@@ -86,6 +92,39 @@ def get_dialout_settings(runner_args: RunnerArguments) -> dict | None:
         return body["dialout_settings"]
     uri = os.getenv("SIP_DIALOUT_URI")
     return {"sipUri": uri} if uri else None
+
+
+def use_harness_account() -> None:
+    """Register as the provisioned harness client by exporting its credentials.
+
+    Fills ``SIP_USER``/``SIP_PASS``/``SIP_DOMAIN`` from ``.state.json`` so the
+    bot answers at the URI ``harness.py status`` prints. Runs at import, since
+    the runner resolves the account before it calls :func:`bot`. An account the
+    environment already names stays as it is, and a ``sip_client`` block in a
+    request body still wins — the runner reads that first.
+    """
+    if os.getenv("SIP_USER") or not STATE_PATH.exists():
+        return
+    try:
+        state = json.loads(STATE_PATH.read_text())
+    except json.JSONDecodeError as e:
+        logger.warning(f"Ignoring {STATE_PATH.name}: not valid JSON ({e})")
+        return
+
+    client = state.get("daily", {}).get("sip_clients", {}).get(HARNESS_BOT_USER, {})
+    if not (client.get("domain") and client.get("password")):
+        return
+
+    os.environ["SIP_USER"] = client["username"]
+    os.environ["SIP_PASS"] = client["password"]
+    os.environ["SIP_DOMAIN"] = client["domain"]
+    # Daily's registrar takes TLS, the transport the runner picks for a client
+    # it provisions itself.
+    os.environ.setdefault("SIP_TRANSPORT", "tls")
+    logger.info(f"Using provisioned harness account: sip:{client['username']}@{client['domain']}")
+
+
+use_harness_account()
 
 
 async def run_bot(

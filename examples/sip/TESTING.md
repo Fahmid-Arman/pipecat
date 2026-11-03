@@ -378,10 +378,10 @@ SIP transport env vars the harness touches (the full surface is documented in
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SIP_USER` / `SIP_PASS` / `SIP_DOMAIN` | unset | the account to register or authenticate as; unset means the runner provisions a temporary Daily client |
+| `SIP_USER` / `SIP_PASS` / `SIP_DOMAIN` | `.state.json`'s `pipecat-harness-bot`, else unset | the account to register or authenticate as; `bot.py` exports the provisioned harness account when these are unset, and the runner provisions a temporary Daily client when there is no state either |
 | `SIP_AUTH_USER` | the user part of the AOR | digest username when it differs — the credential-list trunk path |
 | `SIP_REG_INTERVAL` | 600 | seconds between registration refreshes; `0` is trunk mode, no registration |
-| `SIP_TRANSPORT` | `udp` for an env account, `tls` for a provisioned client | SIP signaling transport |
+| `SIP_TRANSPORT` | `tls` for the harness account or a provisioned client, `udp` for any other env account | SIP signaling transport |
 | `SIP_DIALOUT_URI` | unset | dial this URI on start; the alternative to a `dialout_settings` runner body |
 | `SIP_INSTANCE_ID` | unset | stable RFC 5626 `+sip.instance`, so a restart replaces its own binding |
 | `SIP_STUN_SERVER` | `stun:stun.l.google.com:19302` | STUN server for `medianat=stun`; `off` disables media-NAT traversal |
