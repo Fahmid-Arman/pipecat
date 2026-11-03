@@ -250,17 +250,26 @@ Symmetric RTP first** (Console > Elastic SIP Trunking > Trunks >
 
 Every milestone is one grep-able INFO line, `[N/6]`, emitted by
 `milestones.py` except `[4/6]`, which `bot.py` logs where it queues the
-greeting. A Tier 0 dial-in run reads:
+greeting. A real Tier 0 dial-in capture (softphone → bot, two spoken turns,
+two dial-pad digits, caller hangs up):
 
 ```
-[1/6] REGISTER ok — reachable at sip:pipecat-harness-bot@<domain>.sip.daily.co
-[2/6] INVITE — call ringing
-[3/6] answered, media flowing (first RTP received)
-[4/6] pipeline started — bot is listening
-DTMF 5
-[5/6] call ended
-[6/6] quality: duration=12s loss=0.0% jitter=3ms rtt=41ms
+00:00:02.793 [1/6] REGISTER ok — reachable at sip:pipecat-harness-bot@cloud-372e5a69aac349f08a312211e75f28c2.sip-us.daily.co
+00:00:09.243 [3/6] answered, media flowing (first RTP received)
+00:00:09.243 [4/6] pipeline started — bot is listening
+00:00:13.776 heard: "Hi."
+00:00:15.754 heard: "I'm just testing something."
+00:00:18.039 DTMF 3
+00:00:19.452 DTMF 4
+00:00:30.363 [6/6] quality: CallStats(duration_s=21, setup_s=0, tx_packets=1056, tx_bytes=168960, tx_errors=0, tx_avg_bitrate_bps=63882, rx_packets=1053, rx_bytes=164736, rx_errors=0, rx_avg_bitrate_bps=62400, tx_lost=0, rx_lost=0, tx_jitter_ms=3.25, rx_jitter_ms=2.25, rtt_ms=13.047, jbuf_late=928, jbuf_lost=24, jbuf_overflow=0, jbuf_out_of_sequence=0, jbuf_delay_ms=40, jbuf_jitter_ms=0, jbuf_skew_ms=0, audio_tx_silence_frames=0, audio_tx_starved_frames=0, audio_rx_dropped_bytes=0, audio_rx_discarded_bytes=0)
+00:00:30.363 [5/6] call ended
 ```
+
+`[2/6]` is absent because `auto_answer` accepts the INVITE before any
+ringback, and `[6/6]` lands just before `[5/6]` — the media stack reports
+its close-time stats while the end-of-call events are still fanning out.
+Zero loss (`tx_lost=0, rx_lost=0`) and single-digit jitter are what a
+healthy same-domain call looks like.
 
 What each one means about the SIP machinery underneath:
 
