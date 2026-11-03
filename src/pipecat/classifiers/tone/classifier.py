@@ -4,7 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Classifier backed by Pipecat Tone's reader, a local model of how one turn of text was meant."""
+"""Classifier backed by Pipecat Tone's reader, a local model of how one turn of text was meant.
+
+Pipecat Tone (https://huggingface.co/pipecat-ai/tone-models) reads one turn
+of text, with the turn before it, and returns the speaker's emotion, whether
+the turn is sarcastic, the move it makes and whether it's only a listening
+sound, each with a calibrated confidence. It runs on the CPU in a few
+milliseconds.
+
+**Alpha.** These types are likely to change between releases.
+"""
 
 import asyncio
 from collections.abc import Mapping, Sequence
