@@ -160,7 +160,7 @@ class PerceptionReader(FrameProcessor):
         if isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, LLMContextAssistantTurnFrame):
-            self._handle_assistant_turn(frame)
+            await self._handle_assistant_turn(frame)
 
         await self.push_frame(frame, direction)
 
@@ -173,7 +173,7 @@ class PerceptionReader(FrameProcessor):
         if frame.text.strip() and self.is_usable:
             frame.perception = await self._read(frame.text)
 
-    def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
+    async def _handle_assistant_turn(self, frame: LLMContextAssistantTurnFrame):
         self._previous = frame.text
 
     async def _declare_signals(self):
