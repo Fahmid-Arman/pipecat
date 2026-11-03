@@ -129,9 +129,12 @@ uv run python examples/sip/bot.py -t sip -d
 
 Wait for `[1/6] REGISTER ok`, then dial the bot's URI from the softphone
 exactly as `provision` printed it — `pipecat-harness-bot@<domain>.sip.daily.co`.
-Expect ringing, a greeting, and a conversation. Press a dial-pad digit to
-exercise DTMF; the bot logs `DTMF <tone>`. Hang up and the bot logs `[5/6]`
-and `[6/6]`.
+Expect no ringback — the bot auto-answers — then a greeting and a
+conversation. Press a dial-pad digit to exercise DTMF; the bot logs
+`DTMF <tone>`. Hang up and the bot logs `[5/6]` and `[6/6]`, then exits on
+its own — one call per run, no Ctrl-C needed. When capturing a run to a
+file, pipe through `tee -i`: plain `tee` dies with the first Ctrl-C and
+drops everything the bot logs while shutting down.
 
 ### 5. The other direction
 
@@ -304,6 +307,15 @@ bug report with the `heard:` lines.
 jump straight to established — the caller hears no ringback and the `[2/6]`
 milestone may never print. Ringing is a dial-out thing, where the far end
 decides when to pick up.
+
+**A captured log ends at `[4/6]` — no `[5/6]` or `[6/6]`.** The bot never got
+to process the hangup: Ctrl-C arrived while the call was still up (or within
+the moment it takes to process the BYE), and in a `bot | tee` pipeline the
+same Ctrl-C kills `tee`, so the lines the bot logs while shutting down never
+reach the file. The bot ends its run by itself once the call ends — hang up,
+watch for `[5/6]`/`[6/6]`, and skip Ctrl-C entirely. When teeing, use
+`tee -i`, which ignores the interrupt and keeps the shutdown lines even if
+Ctrl-C comes early.
 
 **Dial-out through the trunk fails instantly with `dial failed: Address
 family not supported by protocol family`.** `medianat=stun` cannot run on a
